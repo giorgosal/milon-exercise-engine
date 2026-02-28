@@ -12,13 +12,13 @@ class PoseEstimator:
         min_tracking_conf=0.5,
         model_complexity=0,
     ):  # 0=light
-        self.source = source
-        self.cap = cv2.VideoCapture(source)
+        # self.source = source
+        # self.cap = cv2.VideoCapture(source)
 
         # detects FPS
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        if self.fps == 0 or self.fps is None:
-            self.fps = 30.0
+        # self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        # if self.fps == 0 or self.fps is None:
+        #     self.fps = 30.0
 
         # Mediapipe Pose initialization
         self.pose = mp.solutions.pose.Pose(

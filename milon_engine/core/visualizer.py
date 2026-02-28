@@ -1,5 +1,5 @@
 import cv2
-import numpy as np
+
 
 class Visualizer:
 
@@ -18,14 +18,18 @@ class Visualizer:
             "border": (80, 80, 80),
         }
 
-    #draw skeleton with mediapipe
+    # draw skeleton with mediapipe
     def draw_skeleton(self, image, results):
         self.mp_drawing.draw_landmarks(
             image,
             results.pose_landmarks,
             self.mp_pose.POSE_CONNECTIONS,
-            self.mp_drawing.DrawingSpec(color=(0, 255, 127), thickness=2, circle_radius=2),
-            self.mp_drawing.DrawingSpec(color=(255, 100, 180), thickness=2, circle_radius=2),
+            self.mp_drawing.DrawingSpec(
+                color=(0, 255, 127), thickness=2, circle_radius=2
+            ),
+            self.mp_drawing.DrawingSpec(
+                color=(255, 100, 180), thickness=2, circle_radius=2
+            ),
         )
 
     # repetitions feedback
@@ -44,20 +48,64 @@ class Visualizer:
         cv2.rectangle(image, (x1, y1), (x2, y2), c["border"], 2)
 
         # text (REPS, STAGE, ANGLE)
-        cv2.putText(image, 'REPS', (25, 45), cv2.FONT_HERSHEY_DUPLEX, 0.7, c["white"], 2, cv2.LINE_AA)
-        cv2.putText(image, f'{rep_count}', (150, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.8, c["accent"], 3, cv2.LINE_AA)
-
-        cv2.putText(image, 'STAGE', (25, 90), cv2.FONT_HERSHEY_DUPLEX, 0.7, c["white"], 2, cv2.LINE_AA)
-        stage_color = (
-            c["warning"] if stage == "down"
-            else c["accent"] if stage == "up"
-            else c["neutral"]
+        cv2.putText(
+            image,
+            "REPS",
+            (25, 45),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.7,
+            c["white"],
+            2,
+            cv2.LINE_AA,
         )
-        cv2.putText(image, f'{(stage or "-").upper()}', (150, 95), cv2.FONT_HERSHEY_SIMPLEX, 1.2, stage_color, 3, cv2.LINE_AA)
+        cv2.putText(
+            image,
+            f"{rep_count}",
+            (150, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.8,
+            c["accent"],
+            3,
+            cv2.LINE_AA,
+        )
+
+        cv2.putText(
+            image,
+            "STAGE",
+            (25, 90),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.7,
+            c["white"],
+            2,
+            cv2.LINE_AA,
+        )
+        stage_color = (
+            c["warning"]
+            if stage == "down"
+            else c["accent"] if stage == "up" else c["neutral"]
+        )
+        cv2.putText(
+            image,
+            f'{(stage or "-").upper()}',
+            (150, 95),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.2,
+            stage_color,
+            3,
+            cv2.LINE_AA,
+        )
 
         if angle is not None:
-            cv2.putText(image, f'{int(angle)}°', (25, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.7, c["accent"], 2, cv2.LINE_AA)
-
+            cv2.putText(
+                image,
+                f"{int(angle)}°",
+                (25, 125),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                c["accent"],
+                2,
+                cv2.LINE_AA,
+            )
 
     # state status feedback
     def draw_system_status(self, image, system_stage):
@@ -95,3 +143,27 @@ class Visualizer:
             2,
             cv2.LINE_AA,
         )
+
+    # In case landmarks are not detected
+    def render_no_detection(self, frame):
+        c = self.colors
+
+        # overlay
+        overlay = frame.copy()
+        h, w = frame.shape[:2]
+        cv2.rectangle(overlay, (0, 0), (w, h), c["panel"], -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+        # text
+        cv2.putText(
+            frame,
+            "No person detected",
+            (int(w / 2) - 150, int(h / 2)),
+            cv2.FONT_HERSHEY_DUPLEX,
+            1.5,
+            c["error"],
+            3,
+            cv2.LINE_AA,
+        )
+
+        return frame

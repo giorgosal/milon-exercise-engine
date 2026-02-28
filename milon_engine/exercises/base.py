@@ -4,7 +4,6 @@ import numpy as np
 from collections import deque
 import mediapipe as mp
 import cv2, yaml
-from milon_engine.core.pose_estimator import PoseEstimator
 
 # landmark names to enums for mediapipe
 NAME2ENUM = {
@@ -17,9 +16,13 @@ NAME2ENUM = {
 # base class for all exercise counters (push-up, squat, leg raise)
 # uses YAML config and calculates side selection, angles, calibration, and auto-start logic.
 class Exercise(ABC):
+    """https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/python#image"""
 
     def __init__(self, config: dict):
         self.config = config
+        # with open(config, "r") as f:
+        #     self.config = yaml.safe_load(f)
+        #  = config
 
         # State variables
         self.rep_count = 0
@@ -29,32 +32,56 @@ class Exercise(ABC):
         # calibration thresholds
         self.down_threshold = None
         self.up_threshold = None
+        self.angle_tolerance = 30  # config.get("angle_tolerance", 20)
 
-    @abstractmethod
-    def evaluate(self, landmarks) -> dict:
-        """Process frame and return state: {angle, stage, rep_count, feedback}"""
-        pass
+    # @abstractmethod
+    # def evaluate(self, landmarks) -> dict:
+    #     """Process frame and return state: {angle, stage, rep_count, feedback, key_points}"""
+    #     pass
 
-    @abstractmethod
-    def _check_rep_transition(self, angle: float, shift: float) -> bool:
-        """Exercise-specific rep completion logic. Returns True if rep counted."""
-        pass
+    # @abstractmethod
+    # def _check_rep_transition(self, angle: float, shift: float) -> bool:
+    #     """Exercise-specific rep completion logic. Returns True if rep counted."""
+    #     pass
 
-    @abstractmethod
-    def get_key_points(self, landmarks, side: str) -> list:
-        """Return list of [point1, point2, point3] for angle calculation."""
-        pass
+    # @abstractmethod
+    # def get_key_points(self, landmarks, side: str) -> list:
+    #     """Return list of [point1, point2, point3] for angle calculation."""
+    #     pass
 
     # thresholds with tolerance
     def _compute_angle_thresholds(self):
-        tol = self.angle_tolerance_pct / 100.0
+        tol = self.angle_tolerance / 100.0
         down_thr = self.down_threshold * (1.0 + tol)
         up_thr = self.up_threshold * (1.0 - tol)
         return down_thr, up_thr
 
+    def load_calibration(self, yaml_path: str):
+        """Load thresholds from YAML"""
+        with open(yaml_path) as f:
+            calib = yaml.safe_load(f)
+        self.down_threshold = calib["down_threshold"]
+        self.up_threshold = calib["up_threshold"]
+
+    # calculates the angle between 3 points
+    @staticmethod
+    def calculate_angle(a, b, c):
+        a, b, c = np.array(a), np.array(b), np.array(c)
+        radians = np.arctan2(c[1] - b[1], c[0] - b[0]) - np.arctan2(
+            a[1] - b[1], a[0] - b[0]
+        )
+        angle = np.abs(radians * 180.0 / np.pi)
+        return 360 - angle if angle > 180.0 else angle
+
+    def reset(self):
+        """Reset counter state"""
+        self.rep_count = 0
+        self.stage = None
+        self.baseline_axis_val = None
+
         # # loads general options from YAML config
         # self.preferred_side = config.get("preferred_side", "auto").lower()
-        # self.angle_tolerance = config.get("angle_tolerance", 20)
+        #
         # self.reference_point = config.get("reference_point", "hip").lower()
 
         # lm_cfg = config.get("landmarks", {})
@@ -74,86 +101,69 @@ class Exercise(ABC):
         # self._angle_history = deque(maxlen=10)
         # self._auto_started = False
 
-    def load_calibration(self, yaml_path: str):
-        """Load thresholds from YAML"""
-        with open(yaml_path) as f:
-            calib = yaml.safe_load(f)
-        self.down_threshold = calib["down_threshold"]
-        self.up_threshold = calib["up_threshold"]
-
-    # calculates the angle between 3 points
-    @staticmethod
-    def calculate_angle(a, b, c):
-        a, b, c = np.array(a), np.array(b), np.array(c)
-        radians = np.arctan2(c[1] - b[1], c[0] - b[0]) - np.arctan2(
-            a[1] - b[1], a[0] - b[0]
-        )
-        angle = np.abs(radians * 180.0 / np.pi)
-        return 360 - angle if angle > 180.0 else angle
-
     # returns the x,y of the landmarks we need
-    def _coords_from_ids(self, landmarks, ids):
-        return [[landmarks[i.value].x, landmarks[i.value].y] for i in ids]
+    # def _coords_from_ids(self, landmarks, ids):
+    #     return [[landmarks[i.value].x, landmarks[i.value].y] for i in ids]
 
-    # calculates the angle between the specific 3 points from the yaml
-    def _angle_for_side(self, landmarks, side: str):
-        ids = self.lm_left if side == "left" else self.lm_right
-        if len(ids) < 3:
-            return None, None
-        pts = self._coords_from_ids(landmarks, ids)
-        return self.calculate_angle(pts[0], pts[1], pts[2]), pts
+    # # calculates the angle between the specific 3 points from the yaml
+    # def _angle_for_side(self, landmarks, side: str):
+    #     ids = self.lm_left if side == "left" else self.lm_right
+    #     if len(ids) < 3:
+    #         return None, None
+    #     pts = self._coords_from_ids(landmarks, ids)
+    #     return self.calculate_angle(pts[0], pts[1], pts[2]), pts
 
-    # returns y of the reference_point
-    def _landmark_y_if_available(self, target_name: str, pts_coords, pts_names):
-        if target_name in pts_names:
-            idx = pts_names.index(target_name)
-            return pts_coords[idx][1]
-        return None
+    # # returns y of the reference_point
+    # def _landmark_y_if_available(self, target_name: str, pts_coords, pts_names):
+    #     if target_name in pts_names:
+    #         idx = pts_names.index(target_name)
+    #         return pts_coords[idx][1]
+    #     return None
 
-    # gets left or right reference_point
-    def get_reference_y(self, landmarks, side):
-        ref_map = {
-            "hip": ("LEFT_HIP", "RIGHT_HIP"),
-            "knee": ("LEFT_KNEE", "RIGHT_KNEE"),
-            "ankle": ("LEFT_ANKLE", "RIGHT_ANKLE"),
-            "shoulder": ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
-            "foot": ("LEFT_FOOT_INDEX", "RIGHT_FOOT_INDEX"),
-        }
+    # # gets left or right reference_point
+    # def get_reference_y(self, landmarks, side):
+    #     ref_map = {
+    #         "hip": ("LEFT_HIP", "RIGHT_HIP"),
+    #         "knee": ("LEFT_KNEE", "RIGHT_KNEE"),
+    #         "ankle": ("LEFT_ANKLE", "RIGHT_ANKLE"),
+    #         "shoulder": ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
+    #         "foot": ("LEFT_FOOT_INDEX", "RIGHT_FOOT_INDEX"),
+    #     }
 
-        ref_pair = ref_map.get(self.reference_point, ref_map["hip"])
-        ref_name = ref_pair[0] if side == "left" else ref_pair[1]
+    #     ref_pair = ref_map.get(self.reference_point, ref_map["hip"])
+    #     ref_name = ref_pair[0] if side == "left" else ref_pair[1]
 
-        pts_names = self.lm_left_names if side == "left" else self.lm_right_names
-        ids = self.lm_left if side == "left" else self.lm_right
-        pts = self._coords_from_ids(landmarks, ids)
-        return self._landmark_y_if_available(ref_name, pts, pts_names)
+    #     pts_names = self.lm_left_names if side == "left" else self.lm_right_names
+    #     ids = self.lm_left if side == "left" else self.lm_right
+    #     pts = self._coords_from_ids(landmarks, ids)
+    #     return self._landmark_y_if_available(ref_name, pts, pts_names)
 
-    # chooses the visible side of the athlete (left or right)
-    def choose_side(self, landmarks):
-        left_angle, left_pts = self._angle_for_side(landmarks, "left")
-        if left_angle is not None:
-            self.side_selected = "left"
-            return left_angle, left_pts, "left"
+    # # chooses the visible side of the athlete (left or right)
+    # def choose_side(self, landmarks):
+    #     left_angle, left_pts = self._angle_for_side(landmarks, "left")
+    #     if left_angle is not None:
+    #         self.side_selected = "left"
+    #         return left_angle, left_pts, "left"
 
-        right_angle, right_pts = self._angle_for_side(landmarks, "right")
-        if right_angle is not None:
-            self.side_selected = "right"
-            return right_angle, right_pts, "right"
+    #     right_angle, right_pts = self._angle_for_side(landmarks, "right")
+    #     if right_angle is not None:
+    #         self.side_selected = "right"
+    #         return right_angle, right_pts, "right"
 
-        return None, None, None
+    #     return None, None, None
 
     # starts counting once the athlete moves or if he is already in position.
-    def detect_auto_start(self, angle):
-        if not self.auto_start_enabled or self.system_stage != "waiting":
-            return
-        self._angle_history.append(angle)
-        if len(self._angle_history) == self._angle_history.maxlen:
-            delta = abs(self._angle_history[-1] - self._angle_history[0])
-            if delta > 8 or (self.up_threshold and angle > self.up_threshold - 5):
-                self.system_stage = "counting"
-                self.stage = "up"
-                self._auto_started = True
-                print("Auto-start — ready for counting")
+    # def detect_auto_start(self, angle):
+    #     if not self.auto_start_enabled or self.system_stage != "waiting":
+    #         return
+    #     self._angle_history.append(angle)
+    #     if len(self._angle_history) == self._angle_history.maxlen:
+    #         delta = abs(self._angle_history[-1] - self._angle_history[0])
+    #         if delta > 8 or (self.up_threshold and angle > self.up_threshold - 5):
+    #             self.system_stage = "counting"
+    #             self.stage = "up"
+    #             self._auto_started = True
+    #             print("Auto-start — ready for counting")
 
     # saves calibration thresholds to a YAML for use in real-time repetition counting
     # def train_from_video(self, video_path, output_yaml):
@@ -225,14 +235,14 @@ class Exercise(ABC):
     #     print(f"Calibration saved to {output_yaml}")
     #     print(calibration_data)
 
-    def reset(self):
-        self.rep_count = 0
-        self.stage = None
-        self.system_stage = "waiting"
-        self.baseline_axis_val = None
-        self.align_counter = 0
-        self.side_selected = None
-        self._side_votes.clear()
-        self._angle_history.clear()
-        self.down_threshold = self.up_threshold = None
-        self._auto_started = False
+    # def reset(self):
+    #     self.rep_count = 0
+    #     self.stage = None
+    #     self.system_stage = "waiting"
+    #     self.baseline_axis_val = None
+    #     self.align_counter = 0
+    #     self.side_selected = None
+    #     # self._side_votes.clear()
+    #     # self._angle_history.clear()
+    #     self.down_threshold = self.up_threshold = None
+    #     self._auto_started = False
