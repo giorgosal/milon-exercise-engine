@@ -1,60 +1,43 @@
 import cv2
 import mediapipe as mp
+from typing import Optional, Tuple, Any
 
 
-# Mediapipe pose wrapper
 class PoseEstimator:
+    """MediaPipe pose wrapper.
+
+    Takes a BGR frame and returns pose landmarks.
+    All MediaPipe-specific details are encapsulated here; callers only
+    interact with detect().
+    """
 
     def __init__(
         self,
-        source=0,
-        min_detection_conf=0.5,
-        min_tracking_conf=0.5,
-        model_complexity=0,
-    ):  # 0=light
-        # self.source = source
-        # self.cap = cv2.VideoCapture(source)
-
-        # detects FPS
-        # self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        # if self.fps == 0 or self.fps is None:
-        #     self.fps = 30.0
-
-        # Mediapipe Pose initialization
-        self.pose = mp.solutions.pose.Pose(
+        min_detection_conf: float = 0.5,
+        min_tracking_conf: float = 0.5,
+        model_complexity: int = 0,  # 0=lite, 1=full, 2=heavy
+    ):
+        self._pose = mp.solutions.pose.Pose(
             min_detection_confidence=min_detection_conf,
             min_tracking_confidence=min_tracking_conf,
             model_complexity=model_complexity,
         )
 
-        # drawing skeletons for visualization
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.mp_pose = mp.solutions.pose
+    def detect(self, frame) -> Tuple[Optional[list], Any]:
+        """Process a BGR frame and return (landmark_list, raw_results).
 
-    # video or camera
-    def read_frame(self):
-        if not self.cap.isOpened():
-            print("VideoCapture is not open.")
-            return None
-        ret, frame = self.cap.read()
-        if not ret:
-            return None
-        return frame
-
-    # processes frame for pose detection (RGB conversion for mediapipe)
-    def process_frame(self, frame):
+        - landmark_list: list of NormalizedLandmark for exercise logic,
+          or None if no pose was detected.
+        - raw_results:   the raw MediaPipe results object, passed to
+          Visualizer.render() for skeleton drawing.
+        """
+        # MediaPipe requires RGB; this is an internal implementation detail
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image.flags.writeable = False
-        results = self.pose.process(image)
+        results = self._pose.process(image)
         image.flags.writeable = True
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        return results, image
 
-    def detect(self, frame):
-        results, _ = self.process_frame(frame)
-        return results.pose_landmarks.landmark if results.pose_landmarks else None
-
-    def release(self):
-        if self.cap.isOpened():
-            self.cap.release()
-        cv2.destroyAllWindows()
+        landmarks = (
+            list(results.pose_landmarks.landmark) if results.pose_landmarks else None
+        )
+        return landmarks, results

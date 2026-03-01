@@ -1,37 +1,51 @@
-from milon_engine.core.visualizer import Visualizer
+import numpy as np
+
 from milon_engine.core.pose_estimator import PoseEstimator
+from milon_engine.core.visualizer import Visualizer
 from milon_engine.exercises.base import Exercise
 
 
 class FrameProcessor:
-    """Coordinates pose detection → exercise logic → visualization"""
+    """Orchestrates the full per-frame pipeline.
+
+    Flow:
+        frame → PoseEstimator.detect()
+              → Exercise.evaluate()
+              → Visualizer.render()
+              → annotated_frame
+
+    The caller (Streamlit, Raspberry Pi script, etc.) is responsible for
+    capturing frames and displaying the returned annotated frame.
+    """
 
     def __init__(
-        self, exercise: Exercise, pose_estimator: PoseEstimator, visualizer: Visualizer
+        self,
+        exercise: Exercise,
+        estimator: PoseEstimator,
+        visualizer: Visualizer,
     ):
         self.exercise = exercise
-        self.pose_estimator = pose_estimator
+        self.estimator = estimator
         self.visualizer = visualizer
 
-    def process_frame(self, frame):
-        """Main pipeline"""
-        # 1. Extract landmarks
-        landmarks = self.pose_estimator.detect(frame)
-        print(landmarks)
-        if landmarks is None:
-            return self.visualizer.render_no_detection(frame)
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Run the full pipeline on a single BGR frame.
 
-        # 2. Exercise logic
+        Args:
+            frame: Raw BGR frame (e.g. from cv2.VideoCapture or Streamlit).
+
+        Returns:
+            Annotated BGR frame ready for display.
+        """
+        # 1. Pose estimation
+        landmarks, raw_results = self.estimator.detect(frame)
+
+        # 2. No detection — render fallback overlay
+        if landmarks is None:
+            return self.visualizer.render(frame, raw_results, None)
+
+        # 3. Exercise logic
         result = self.exercise.evaluate(landmarks)
 
-        # # 3. Visualization
-        # annotated_frame = self.visualizer.render(
-        #     frame,
-        #     landmarks=landmarks,
-        #     angle=result["angle"],
-        #     reps=result["reps"],
-        #     stage=result["stage"],
-        #     feedback=result["feedback"],
-        # )
-        annotated_frame = frame
-        return annotated_frame
+        # 4. Visualize
+        return self.visualizer.render(frame, raw_results, result)

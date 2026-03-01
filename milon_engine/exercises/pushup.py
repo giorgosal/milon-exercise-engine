@@ -1,94 +1,92 @@
-from milon_engine.exercises import Exercise
+import os
+import yaml
+from typing import Optional
 
-import os, yaml
+from milon_engine.exercises.base import Exercise
+from milon_engine.core.models import ExerciseResult
 
 
 class PushUp(Exercise):
+    """Rep counter for push-ups.
 
-    def __init__(self, config: dict, calibration_path=None):
-        super().__init__(config)
+    Uses shoulder-elbow-wrist angle combined with vertical shoulder
+    displacement to detect down/up transitions.
+    """
+
+    # Time the athlete must hold the aligned position before counting starts
+    MIN_ALIGN_SEC: float = 0.7
+    MAX_ALIGN_SEC: float = 3.0
+
+    def __init__(
+        self, config: dict, fps: float = 30.0, calibration_path: Optional[str] = None
+    ):
+        super().__init__(config, fps)
+
+        self._down_shift_min: float = 0.05
+        self._up_shift_max: float = 0.02
+        self.align_counter: int = 0
+        self.has_been_up: bool = False
+
         calib_path = (
             calibration_path
             or f"outputs/calibration/{config['exercise_name'].lower()}.yaml"
         )
 
-        #  defaults fallbacks
-        self._base_down_thr = 90.0
-        self._base_up_thr = 140.0
-        self._down_shift_min_default = 0.05
-        self._up_shift_max_default = 0.02
+        if os.path.exists(calib_path):
+            with open(calib_path, "r") as f:
+                calib = yaml.safe_load(f) or {}
 
-        # load calibration YAML
-        with open(calib_path, "r") as f:
-            calib = yaml.safe_load(f) or {}
+            self.down_threshold = float(calib["down_threshold"])
+            self.up_threshold = float(calib["up_threshold"])
+            self._down_shift_min = float(calib["down_shift_delta"])
+            self._up_shift_max = float(calib["up_shift_delta"])
+            print(f"Loaded push-up calibration from: {calib_path}")
 
-        self._base_down_thr = float(calib["down_threshold"])
-        self._base_up_thr = float(calib["up_threshold"])
-        self._down_shift_min = float(calib["down_shift_delta"])
-        self._up_shift_max = float(calib["up_shift_delta"])
-        print(f" Loaded calibration from: {calib_path}")
+    def evaluate(self, landmarks: list) -> ExerciseResult:
+        """Process landmarks and return updated exercise state."""
+        min_align_frames = max(1, int(self.fps * self.MIN_ALIGN_SEC))
+        max_align_frames = max(min_align_frames, int(self.fps * self.MAX_ALIGN_SEC))
 
-        # angle tolerance (%)
-        self.angle_tolerance_pct = float(self.config.get("angle_tolerance", 0))
-
-        # states
-        self.system_stage = "waiting"  # waiting -> aligning -> ready -> counting
-        self.stage = None  # down/ up
-        self.align_counter = 0
-        self.baseline_axis_val = None  # baseline_shoulder_y
-
-        self.rep_count = 0
-        self.has_been_up = False
-
-        # aligning time before starting
-        self.MIN_ALIGN_SEC = 0.7
-        self.MAX_ALIGN_SEC = 3.0
-        self.min_align_frames = 0
-        self.max_align_frames = 0
-        self._fps_last = 30.0
-
-    # main function
-    def update(self, landmarks, fps):
-        # calculate how many frames the user must hold a straight pose to be ready
-        if fps and fps > 0:
-            self._fps_last = fps
-            self.min_align_frames = max(1, int(self._fps_last * self.MIN_ALIGN_SEC))
-            self.max_align_frames = max(
-                self.min_align_frames, int(self._fps_last * self.MAX_ALIGN_SEC)
-            )
-
-        # angle and side detection
         angle, pts, side = self.choose_side(landmarks)
-        if angle is None or pts is None:
+
+        if angle is None or pts is None or side is None:
             self.system_stage = "waiting"
             self.stage = None
-            return {
-                "angle": None,
-                "system_stage": self.system_stage,
-                "rep_count": int(self.rep_count),
-            }
+            return ExerciseResult(
+                angle=None,
+                rep_count=self.rep_count,
+                stage=self.stage,
+                system_stage=self.system_stage,
+            )
 
-        # shoulder y-axis reference
         ref_y = self.get_reference_y(landmarks, side)
         if ref_y is None:
-            return {
-                "angle": float(angle),
-                "system_stage": self.system_stage,
-                "rep_count": int(self.rep_count),
-            }
+            return ExerciseResult(
+                angle=float(angle),
+                rep_count=self.rep_count,
+                stage=self.stage,
+                system_stage=self.system_stage,
+                side=self.side_selected,
+            )
 
-        # angle & shift thresholds
+        # Calibration not loaded yet — skip state machine
+        if self.up_threshold is None or self.down_threshold is None:
+            return ExerciseResult(
+                angle=float(angle),
+                rep_count=self.rep_count,
+                stage=self.stage,
+                system_stage=self.system_stage,
+                side=self.side_selected,
+            )
+
         down_thr, up_thr = self._compute_angle_thresholds()
-        down_shift_min = self._down_shift_min
-        up_shift_max = self._up_shift_max
 
-        # detect upright position
+        # --- State machine ---
         if self.system_stage == "waiting":
             if angle > max(120.0, up_thr - 5.0):
                 self.system_stage = "aligning"
                 self.align_counter = 0
 
-        # set baseline position
         elif self.system_stage == "aligning":
             if angle > max(120.0, up_thr - 5.0):
                 self.align_counter += 1
@@ -101,59 +99,42 @@ class PushUp(Exercise):
                 self.baseline_axis_val = 0.9 * self.baseline_axis_val + 0.1 * ref_y
 
             if (
-                self.align_counter > self.min_align_frames
-                or self.align_counter > self.max_align_frames
+                self.align_counter > min_align_frames
+                or self.align_counter > max_align_frames
             ):
                 self.baseline_axis_val = ref_y
                 self.system_stage = "ready"
                 self.stage = "up"
 
-        # detect initial descent
         elif self.system_stage == "ready":
             if angle < min(120.0, down_thr + 10.0):
                 self.system_stage = "counting"
 
-        # count reps based on angle & shift
         elif self.system_stage == "counting":
             shift = ref_y - (
                 self.baseline_axis_val if self.baseline_axis_val is not None else ref_y
             )
 
-            if angle < down_thr and shift > down_shift_min:
+            if angle < down_thr and shift > self._down_shift_min:
                 self.stage = "down"
 
-            if self.stage == "down" and angle > up_thr and shift < up_shift_max:
+            if self.stage == "down" and angle > up_thr and shift < self._up_shift_max:
                 self.rep_count += 1
                 self.stage = "up"
+                print(f"Push-up rep {self.rep_count}")
 
-            self.baseline_axis_val = 0.995 * self.baseline_axis_val + 0.005 * ref_y
+            if self.baseline_axis_val is not None:
+                self.baseline_axis_val = 0.995 * self.baseline_axis_val + 0.005 * ref_y
 
-        # debug log
-        shift_val = ref_y - (
-            self.baseline_axis_val if self.baseline_axis_val is not None else ref_y
+        return ExerciseResult(
+            angle=float(angle),
+            rep_count=self.rep_count,
+            stage=self.stage,
+            system_stage=self.system_stage,
+            side=self.side_selected,
         )
-        print(
-            f"[DEBUG][PUSHUP] Stage:{self.stage}, System:{self.system_stage}, "
-            f"Angle:{angle:.2f}°, ↓Thr:{down_thr:.2f}, ↑Thr:{up_thr:.2f}, "
-            f"Shift:{shift_val:+.3f}, down_shift_min:{down_shift_min:.3f}, up_shift_max:{up_shift_max:.3f}, "
-            f"reps:{self.rep_count}"
-        )
 
-        # return payload
-        return {
-            "angle": float(angle),
-            "ref_y": float(ref_y),
-            "rep_count": int(self.rep_count),
-            "stage": self.stage,
-            "system_stage": self.system_stage,
-            "side": self.side_selected or side,
-        }
-
-    def reset(self):
+    def reset(self) -> None:
         super().reset()
-        self.system_stage = "waiting"
-        self.stage = None
         self.align_counter = 0
-        self.baseline_axis_val = None
-        self.rep_count = 0
         self.has_been_up = False
