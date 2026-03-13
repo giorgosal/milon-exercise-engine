@@ -1,18 +1,15 @@
 import av
-import cv2
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 
 from milon_engine import FrameProcessor, PoseEstimator, Visualizer, load_config
 from milon_engine.exercises import Squat, PushUp, LegRaise
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Milon Exercise Counter", layout="centered")
-st.title("Milon Exercise Counter")
-st.write("Επίλεξε άσκηση, δώσε άδεια στην κάμερα και ξεκίνα!")
+st.set_page_config(page_title="Milon Exercise Counter", layout="wide")
 
-# ── ICE / TURN configuration ─────────────────────────────────────────────────
+# ── ICE / TURN configuration ──────────────────────────────────────────────────
 # Twilio Network Traversal Service gives reliable TURN servers.
 # Credentials are fetched dynamically (they expire every 24 h).
 # TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set as Streamlit secrets.
@@ -49,16 +46,104 @@ def _get_rtc_configuration() -> dict:
 
 RTC_CONFIGURATION = _get_rtc_configuration()
 
-# ── Exercise selection ────────────────────────────────────────────────────────
+# ── Language & strings ────────────────────────────────────────────────────────
 
-EXERCISES = {
-    "Squat": ("squat", Squat),
-    "Push-up": ("pushup", PushUp),
-    "Leg Raise": ("legraise", LegRaise),
+STRINGS = {
+    "el": {
+        "title": "Milon Exercise Counter",
+        "subtitle": "Επίλεξε άσκηση, δώσε άδεια στην κάμερα και ξεκίνα!",
+        "exercise_label": "Άσκηση",
+        "lang_label": "Language / Γλώσσα",
+        "info": (
+            "Πάτα **START** για να ενεργοποιήσεις την κάμερα. "
+            "Σταθεροποίησε τη στάση σου και το σύστημα θα ξεκινήσει αυτόματα."
+        ),
+        "instructions": {
+            "Squat": (
+                "**Οδηγίες**\n\n"
+                "- Στάσου μπροστά από την κάμερα ώστε να φαίνεται ολόκληρο το σώμα σου.\n"
+                "- Πόδια σε πλάτος ώμων.\n"
+                "- Κατέβα αργά μέχρι οι μηροί να είναι παράλληλοι με το έδαφος.\n"
+                "- Επέστρεψε αργά στην αρχική θέση."
+            ),
+            "Push-up": (
+                "**Οδηγίες**\n\n"
+                "- Τοποθέτησε την κάμερα στο πλάι σου ώστε να φαίνεται το σώμα σου από πλάγια.\n"
+                "- Ξεκίνα σε θέση σανίδας (plank).\n"
+                "- Κατέβασε το στήθος κοντά στο έδαφος.\n"
+                "- Σπρώξε πίσω προς τα πάνω."
+            ),
+            "Leg Raise": (
+                "**Οδηγίες**\n\n"
+                "- Ξάπλωσε ανάσκελα μπροστά από την κάμερα.\n"
+                "- Κράτα τα πόδια σου ευθεία.\n"
+                "- Σήκωσε τα πόδια μέχρι 90° και κατέβασέ τα αργά.\n"
+                "- Η κάμερα πρέπει να βλέπει ολόκληρο το σώμα."
+            ),
+        },
+    },
+    "en": {
+        "title": "Milon Exercise Counter",
+        "subtitle": "Select an exercise, allow camera access, and start!",
+        "exercise_label": "Exercise",
+        "lang_label": "Language / Γλώσσα",
+        "info": (
+            "Press **START** to activate the camera. "
+            "Get into position and the system will start counting automatically."
+        ),
+        "instructions": {
+            "Squat": (
+                "**Instructions**\n\n"
+                "- Stand in front of the camera so your full body is visible.\n"
+                "- Feet shoulder-width apart.\n"
+                "- Lower slowly until thighs are parallel to the floor.\n"
+                "- Return slowly to the starting position."
+            ),
+            "Push-up": (
+                "**Instructions**\n\n"
+                "- Place the camera to your side so your body is visible in profile.\n"
+                "- Start in a plank position.\n"
+                "- Lower your chest close to the floor.\n"
+                "- Push back up."
+            ),
+            "Leg Raise": (
+                "**Instructions**\n\n"
+                "- Lie on your back facing the camera.\n"
+                "- Keep your legs straight.\n"
+                "- Raise your legs to 90° then lower them slowly.\n"
+                "- The camera must see your full body."
+            ),
+        },
+    },
 }
 
-choice = st.selectbox("Άσκηση", list(EXERCISES.keys()))
-config_name, ExerciseClass = EXERCISES[choice]
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    lang = st.selectbox(
+        "Language / Γλώσσα",
+        options=["el", "en"],
+        format_func=lambda x: "Ελληνικά" if x == "el" else "English",
+        key="lang",
+    )
+    T = STRINGS[lang]
+
+    st.title(T["title"])
+    st.caption(T["subtitle"])
+    st.divider()
+
+    EXERCISES = {
+        "Squat": ("squat", Squat),
+        "Push-up": ("pushup", PushUp),
+        "Leg Raise": ("legraise", LegRaise),
+    }
+
+    choice = st.selectbox(
+        T["exercise_label"], list(EXERCISES.keys()), key="exercise_choice"
+    )
+    config_name, ExerciseClass = EXERCISES[choice]
+
+    st.markdown(T["instructions"][choice])
 
 # Store the current selection in session_state so the processor can read it.
 st.session_state["config_name"] = config_name
@@ -92,12 +177,10 @@ class ExerciseProcessor(VideoProcessorBase):
         return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
 
-# ── WebRTC streamer ───────────────────────────────────────────────────────────
+# ── Main area ─────────────────────────────────────────────────────────────────
 
-st.info(
-    "Πάτα **START** για να ενεργοποιήσεις την κάμερα. "
-    "Σταθεροποίησε τη στάση σου και το σύστημα θα ξεκινήσει αυτόματα."
-)
+st.title(T["title"])
+st.info(T["info"])
 
 webrtc_streamer(
     key="exercise_stream",
