@@ -1,3 +1,4 @@
+import os
 import shutil
 import pathlib
 import cv2
@@ -10,26 +11,41 @@ _BUNDLED_MODEL = (
     pathlib.Path(__file__).parent.parent / "models" / "pose_landmark_lite.tflite"
 )
 
+_MODEL_RELATIVE_PATH = "mediapipe/modules/pose_landmark/pose_landmark_lite.tflite"
+
 
 def _ensure_mediapipe_model() -> None:
-    """Copy the bundled tflite model into the mediapipe modules directory.
+    """Guarantee that mediapipe can find pose_landmark_lite.tflite.
 
-    mediapipe 0.10.21 tries to download pose_landmark_lite.tflite on first
-    use and cache it inside its own package directory.  On Streamlit Cloud
-    that directory is read-only, which raises a PermissionError.  We
-    pre-populate the target path from our bundled copy so mediapipe finds
-    the file already in place and skips the download entirely.
+    mediapipe 0.10.21 calls download_utils.download_oss_model() which:
+      1. Resolves model_abspath = <mp_root>/<model_relative_path>
+      2. Returns immediately if the file already exists there.
+      3. Otherwise tries to download + write it — which fails with
+         PermissionError on Streamlit Cloud (read-only venv).
+
+    Strategy: monkey-patch download_utils so that mp_root_path points to
+    a writable temp directory, then pre-populate that directory with our
+    bundled copy.  mediapipe will find the file at step 2 and skip the
+    download entirely.
     """
-    try:
-        mp_pose_dir = pathlib.Path(mp.__file__).parent / "modules" / "pose_landmark"
-        target = mp_pose_dir / "pose_landmark_lite.tflite"
-        if not target.exists():
-            mp_pose_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(_BUNDLED_MODEL, target)
-    except (OSError, PermissionError):
-        # If we cannot write there either (e.g. already exists and is
-        # read-only), just continue — mediapipe will find the file.
-        pass
+    import mediapipe.python.solutions.download_utils as _du
+
+    # Build a writable root that mirrors what mediapipe expects:
+    # <root>/mediapipe/modules/pose_landmark/pose_landmark_lite.tflite
+    tmp_root = pathlib.Path("/tmp/mediapipe_models")
+    target = tmp_root / _MODEL_RELATIVE_PATH
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_BUNDLED_MODEL, target)
+
+    # Patch __file__ on the download_utils module so that the 4-levels-up
+    # calculation inside download_oss_model() resolves to tmp_root.
+    # original:  <site-packages>/mediapipe/python/solutions/download_utils.py
+    # patched:   <tmp_root>/mediapipe/python/solutions/download_utils.py
+    fake_file = str(
+        tmp_root / "mediapipe" / "python" / "solutions" / "download_utils.py"
+    )
+    _du.__file__ = fake_file
 
 
 class PoseEstimator:
