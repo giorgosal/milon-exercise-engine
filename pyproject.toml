@@ -49,7 +49,7 @@ Repository = "https://github.com/ieee-sb-uniwa/milon-exercise-engine"
 include = ["milon_engine", "milon_engine.*"]
 
 [tool.setuptools.package-data]
-milon_engine = ["configs/*.yaml", "configs/*.toml", "calibration/*.yaml"]
+milon_engine = ["configs/*.yaml", "configs/*.toml", "calibration/*.yaml", "models/*.tflite"]
 
 [tool.black]
 line-length = 88

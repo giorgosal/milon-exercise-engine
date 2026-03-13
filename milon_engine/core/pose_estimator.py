@@ -1,6 +1,35 @@
+import shutil
+import pathlib
 import cv2
 import mediapipe as mp
 from typing import Optional, Tuple, Any
+
+# Bundled model file (ships with the package so the Streamlit Cloud
+# read-only venv directory never needs to be written to by mediapipe).
+_BUNDLED_MODEL = (
+    pathlib.Path(__file__).parent.parent / "models" / "pose_landmark_lite.tflite"
+)
+
+
+def _ensure_mediapipe_model() -> None:
+    """Copy the bundled tflite model into the mediapipe modules directory.
+
+    mediapipe 0.10.21 tries to download pose_landmark_lite.tflite on first
+    use and cache it inside its own package directory.  On Streamlit Cloud
+    that directory is read-only, which raises a PermissionError.  We
+    pre-populate the target path from our bundled copy so mediapipe finds
+    the file already in place and skips the download entirely.
+    """
+    try:
+        mp_pose_dir = pathlib.Path(mp.__file__).parent / "modules" / "pose_landmark"
+        target = mp_pose_dir / "pose_landmark_lite.tflite"
+        if not target.exists():
+            mp_pose_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_BUNDLED_MODEL, target)
+    except (OSError, PermissionError):
+        # If we cannot write there either (e.g. already exists and is
+        # read-only), just continue — mediapipe will find the file.
+        pass
 
 
 class PoseEstimator:
@@ -17,6 +46,7 @@ class PoseEstimator:
         min_tracking_conf: float = 0.5,
         model_complexity: int = 0,  # 0=lite, 1=full, 2=heavy
     ):
+        _ensure_mediapipe_model()
         self._pose = mp.solutions.pose.Pose(
             min_detection_confidence=min_detection_conf,
             min_tracking_confidence=min_tracking_conf,
