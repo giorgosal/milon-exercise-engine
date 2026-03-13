@@ -30,7 +30,7 @@ classifiers = [
 
 dependencies = [
     "mediapipe==0.10.21",
-    "opencv-python==4.11.0.86",
+    "opencv-python-headless==4.11.0.86",
     "numpy>=1.26.0",
     "pyyaml==6.0.3",
 ]
@@ -49,7 +49,7 @@ Repository = "https://github.com/ieee-sb-uniwa/milon-exercise-engine"
 include = ["milon_engine", "milon_engine.*"]
 
 [tool.setuptools.package-data]
-milon_engine = ["configs/*.yaml", "configs/*.toml"]
+milon_engine = ["configs/*.yaml", "configs/*.toml", "calibration/*.yaml"]
 
 [tool.black]
 line-length = 88
