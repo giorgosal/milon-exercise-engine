@@ -12,6 +12,43 @@ st.set_page_config(page_title="Milon Exercise Counter", layout="centered")
 st.title("Milon Exercise Counter")
 st.write("Επίλεξε άσκηση, δώσε άδεια στην κάμερα και ξεκίνα!")
 
+# ── ICE / TURN configuration ─────────────────────────────────────────────────
+# Twilio Network Traversal Service gives reliable TURN servers.
+# Credentials are fetched dynamically (they expire every 24 h).
+# TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set as Streamlit secrets.
+
+
+def _get_rtc_configuration() -> dict:
+    try:
+        import urllib.request
+        import json
+        import base64
+
+        sid = st.secrets["TWILIO_ACCOUNT_SID"]
+        token = st.secrets["TWILIO_AUTH_TOKEN"]
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Tokens.json"
+        req = urllib.request.Request(url, method="POST", data=b"")
+        creds = base64.b64encode(f"{sid}:{token}".encode()).decode()
+        req.add_header("Authorization", f"Basic {creds}")
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+        return {"iceServers": data["ice_servers"]}
+    except Exception:
+        # Fall back to public STUN + openrelay TURN if secrets are missing
+        return {
+            "iceServers": [
+                {"urls": "stun:stun.l.google.com:19302"},
+                {
+                    "urls": "turn:openrelay.metered.ca:443?transport=tcp",
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject",
+                },
+            ]
+        }
+
+
+RTC_CONFIGURATION = _get_rtc_configuration()
+
 # ── Exercise selection ────────────────────────────────────────────────────────
 
 EXERCISES = {
@@ -28,11 +65,8 @@ st.session_state["config_name"] = config_name
 st.session_state["ExerciseClass"] = ExerciseClass
 
 # ── Video processor ───────────────────────────────────────────────────────────
-# We use a FIXED key ("exercise_stream") so the webrtc_streamer is never
-# torn down when the user switches exercises — avoiding the Python 3.14
-# shutdown bug ('NoneType' has no attribute 'is_alive').
-# Instead, the processor checks session_state each frame and swaps the
-# internal pipeline when the exercise changes.
+# Fixed key so webrtc_streamer is never torn down on exercise change.
+# The processor swaps its internal pipeline via session_state instead.
 
 
 class ExerciseProcessor(VideoProcessorBase):
@@ -48,7 +82,6 @@ class ExerciseProcessor(VideoProcessorBase):
         self.processor = FrameProcessor(exercise, PoseEstimator(), Visualizer())
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        # Rebuild pipeline if the user switched exercise
         new_choice = st.session_state.get("config_name")
         if new_choice != self._current_choice:
             self._current_choice = new_choice
@@ -60,30 +93,6 @@ class ExerciseProcessor(VideoProcessorBase):
 
 
 # ── WebRTC streamer ───────────────────────────────────────────────────────────
-# ICE servers: Google STUN + open-relay.metered.ca TURN (free, no account needed).
-# TURN is required on Streamlit Cloud because the server sits behind a firewall
-# and peer-to-peer WebRTC connections cannot be established with STUN alone.
-
-RTC_CONFIGURATION = {
-    "iceServers": [
-        {"urls": "stun:stun.l.google.com:19302"},
-        {
-            "urls": "turn:openrelay.metered.ca:80",
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-        {
-            "urls": "turn:openrelay.metered.ca:443",
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-        {
-            "urls": "turn:openrelay.metered.ca:443?transport=tcp",
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-    ]
-}
 
 st.info(
     "Πάτα **START** για να ενεργοποιήσεις την κάμερα. "
@@ -91,7 +100,7 @@ st.info(
 )
 
 webrtc_streamer(
-    key="exercise_stream",  # σταθερό key — δεν γίνεται teardown κατά την αλλαγή άσκησης
+    key="exercise_stream",
     video_processor_factory=ExerciseProcessor,
     rtc_configuration=RTC_CONFIGURATION,
     media_stream_constraints={"video": True, "audio": False},
