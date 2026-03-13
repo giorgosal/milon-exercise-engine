@@ -16,7 +16,7 @@ st.write("Επίλεξε άσκηση, δώσε άδεια στην κάμερα
 
 EXERCISES = {
     "Squat": ("squat", Squat),
-    "Push-up": ("push-up", PushUp),
+    "Push-up": ("pushup", PushUp),
     "Leg Raise": ("legraise", LegRaise),
 }
 
@@ -45,6 +45,30 @@ class ExerciseProcessor(VideoProcessorBase):
 
 
 # ── WebRTC streamer ───────────────────────────────────────────────────────────
+# ICE servers: Google STUN + open-relay.metered.ca TURN (free, no account needed).
+# TURN is required on Streamlit Cloud because the server sits behind a firewall
+# and peer-to-peer WebRTC connections cannot be established with STUN alone.
+
+RTC_CONFIGURATION = {
+    "iceServers": [
+        {"urls": "stun:stun.l.google.com:19302"},
+        {
+            "urls": "turn:openrelay.metered.ca:80",
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+        {
+            "urls": "turn:openrelay.metered.ca:443",
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+        {
+            "urls": "turn:openrelay.metered.ca:443?transport=tcp",
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
+    ]
+}
 
 st.info(
     "Πάτα **START** για να ενεργοποιήσεις την κάμερα. "
@@ -55,6 +79,7 @@ webrtc_streamer(
     key=choice,  # το key αλλάζει όταν αλλάζει η άσκηση,
     # ώστε να ξαναδημιουργηθεί ο processor
     video_processor_factory=ExerciseProcessor,
+    rtc_configuration=RTC_CONFIGURATION,
     media_stream_constraints={"video": True, "audio": False},
     async_processing=True,
 )
