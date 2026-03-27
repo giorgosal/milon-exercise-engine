@@ -186,6 +186,13 @@ webrtc_streamer(
     key="exercise_stream",
     video_processor_factory=ExerciseProcessor,
     rtc_configuration=RTC_CONFIGURATION,
-    media_stream_constraints={"video": True, "audio": False},
+    media_stream_constraints={
+        "video": {
+            "width": {"min": 320, "ideal": 1280, "max": 1920},
+            "height": {"min": 240, "ideal": 720, "max": 1080},
+            "frameRate": {"ideal": 24, "max": 30},
+        },
+        "audio": False,
+    },
     async_processing=True,
 )
