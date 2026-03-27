@@ -138,16 +138,44 @@ with st.sidebar:
         "Leg Raise": ("legraise", LegRaise),
     }
 
+    VIDEO_PROFILES = {
+        "1080p": {
+            "width": {"exact": 1920},
+            "height": {"exact": 1080},
+            "frameRate": {"ideal": 24, "max": 30},
+        },
+        "720p": {
+            "width": {"exact": 1280},
+            "height": {"exact": 720},
+            "frameRate": {"ideal": 24, "max": 30},
+        },
+        "Lower (480p)": {
+            "width": {"exact": 640},
+            "height": {"exact": 480},
+            "frameRate": {"ideal": 20, "max": 24},
+        },
+    }
+
     choice = st.selectbox(
         T["exercise_label"], list(EXERCISES.keys()), key="exercise_choice"
     )
     config_name, ExerciseClass = EXERCISES[choice]
+
+    video_profile = st.selectbox(
+        "Camera quality",
+        options=list(VIDEO_PROFILES.keys()),
+        index=1,
+        key="video_profile",
+    )
+
+    st.caption("If video lags, press STOP, switch profile, then press START again.")
 
     st.markdown(T["instructions"][choice])
 
 # Store the current selection in session_state so the processor can read it.
 st.session_state["config_name"] = config_name
 st.session_state["ExerciseClass"] = ExerciseClass
+st.session_state["video_constraints"] = VIDEO_PROFILES[video_profile]
 
 # ── Video processor ───────────────────────────────────────────────────────────
 # Fixed key so webrtc_streamer is never torn down on exercise change.
@@ -187,11 +215,7 @@ webrtc_streamer(
     video_processor_factory=ExerciseProcessor,
     rtc_configuration=RTC_CONFIGURATION,
     media_stream_constraints={
-        "video": {
-            "width": {"min": 320, "ideal": 1280, "max": 1920},
-            "height": {"min": 240, "ideal": 720, "max": 1080},
-            "frameRate": {"ideal": 24, "max": 30},
-        },
+        "video": st.session_state["video_constraints"],
         "audio": False,
     },
     async_processing=True,
